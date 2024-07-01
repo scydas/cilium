@@ -28,6 +28,7 @@ type ciliumEnvoyConfigManager interface {
 	addCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error
 	updateCiliumEnvoyConfig(oldCECObjectMeta metav1.ObjectMeta, oldCECSpec *ciliumv2.CiliumEnvoyConfigSpec, newCECObjectMeta metav1.ObjectMeta, newCECSpec *ciliumv2.CiliumEnvoyConfigSpec) error
 	deleteCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error
+	syncCiliumEnvoyConfigService(name string, namespace string, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error
 }
 
 type cecManager struct {
@@ -90,7 +91,7 @@ func (r *cecManager) addCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSp
 
 	name := service.L7LBResourceName{Name: cecObjectMeta.Name, Namespace: cecObjectMeta.Namespace}
 	if err := r.addK8sServiceRedirects(name, cecSpec, resources); err != nil {
-		return fmt.Errorf("failed to redirect k8s services to Envoy: %w", err)
+		return fmt.Errorf("failed to redirect k8s services to Envoy in CEC Add: %w", err)
 	}
 
 	if len(resources.Listeners) > 0 {
@@ -135,6 +136,13 @@ func (r *cecManager) addK8sServiceRedirects(resourceName service.L7LBResourceNam
 			return fmt.Errorf("listener %q not found in resources", svc.Listener)
 		}
 
+		// Add any relevant Nodeport values into the list of Ports to redirect.
+		nodePorts, err := r.getServiceNodeports(svc.Name, svc.Namespace, svc.Ports)
+		if err != nil {
+			return err
+		}
+		svc.Ports = append(svc.Ports, nodePorts...)
+
 		// Tell service manager to redirect the service to the port
 		serviceName := getServiceName(resourceName, svc.Name, svc.Namespace, true)
 		if err := r.serviceManager.RegisterL7LBServiceRedirect(serviceName, resourceName, proxyPort, svc.Ports); err != nil {
@@ -145,6 +153,12 @@ func (r *cecManager) addK8sServiceRedirects(resourceName service.L7LBResourceNam
 			return err
 		}
 	}
+	return r.syncCiliumEnvoyConfigService(resourceName.Name, resourceName.Namespace, spec)
+}
+
+func (r *cecManager) syncCiliumEnvoyConfigService(name string, namespace string, spec *ciliumv2.CiliumEnvoyConfigSpec) error {
+	resourceName := service.L7LBResourceName{Name: name, Namespace: namespace}
+
 	// Register services for Envoy backend sync
 	for _, svc := range spec.BackendServices {
 		serviceName := getServiceName(resourceName, svc.Name, svc.Namespace, false)
@@ -178,8 +192,30 @@ func (r *cecManager) addK8sServiceRedirects(resourceName service.L7LBResourceNam
 			}
 		}
 	}
-
 	return nil
+}
+
+// getServiceNodeports returns any relevant Nodeport numbers for the provided
+// Service ports. If the provided servicePorts do not have any nodeports set, returns
+// an empty list.
+func (r *cecManager) getServiceNodeports(name, namespace string, servicePorts []uint16) ([]uint16, error) {
+	var nodePorts []uint16
+	kSvc, err := r.getK8sService(name, namespace)
+	if err != nil {
+		return nodePorts, fmt.Errorf("could not retrieve service details for service %s/%s", namespace, name)
+	}
+
+	for _, servicePort := range servicePorts {
+		for _, port := range kSvc.Spec.Ports {
+			if servicePort == uint16(port.Port) {
+				if port.NodePort != 0 {
+					nodePorts = append(nodePorts, uint16(port.NodePort))
+				}
+			}
+		}
+	}
+
+	return nodePorts, nil
 }
 
 // getK8sService retrieves k8s service from the store
@@ -192,6 +228,9 @@ func (r *cecManager) getK8sService(name string, namespace string) (*slim_corev1.
 		Name:      name,
 		Namespace: namespace,
 	})
+	if svc == nil {
+		return nil, fmt.Errorf("retrieved nil details for Service %s/%s", namespace, name)
+	}
 	if !exists || err != nil {
 		return nil, err
 	}
@@ -304,7 +343,7 @@ func (r *cecManager) updateCiliumEnvoyConfig(
 	}
 
 	if err := r.addK8sServiceRedirects(name, newCECSpec, newResources); err != nil {
-		return fmt.Errorf("failed to redirect k8s services to Envoy: %w", err)
+		return fmt.Errorf("failed to redirect k8s services to Envoy in CEC Update: %w", err)
 	}
 
 	if oldResources.ListenersAddedOrDeleted(&newResources) {

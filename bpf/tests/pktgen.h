@@ -1,8 +1,7 @@
 /* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
 /* Copyright Authors of Cilium */
 
-#ifndef __TEST_PKTGEN__
-#define __TEST_PKTGEN__
+#pragma once
 
 #include <bpf/compiler.h>
 #include <bpf/builtins.h>
@@ -825,6 +824,7 @@ static __always_inline void pktgen__finish_ipv4(const struct pktgen *builder, in
 	v4len = (__be16)(builder->cur_off - builder->layer_offsets[i]);
 	/* Calculate total length, which is IPv4 hdr + all layers after it */
 	ipv4_layer->tot_len = __bpf_htons(v4len);
+	ipv4_layer->check = csum_fold(csum_diff(NULL, 0, ipv4_layer, sizeof(struct iphdr), 0));
 }
 
 static __always_inline void pktgen__finish_ipv6(const struct pktgen *builder, int i)
@@ -1086,5 +1086,3 @@ void pktgen__finish(const struct pktgen *builder)
 		}
 	}
 };
-
-#endif /* __TEST_PKTGEN__ */

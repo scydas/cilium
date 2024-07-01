@@ -115,6 +115,7 @@ func TestL3WithIngressDenyWildcard(t *testing.T) {
 		idFooSelectLabels[lbl.Key] = lbl
 	}
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
+	td.addIdentity(fooIdentity)
 
 	selFoo := api.NewESFromLabels(labels.ParseSelectLabel("id=foo"))
 	rule1 := api.Rule{
@@ -146,7 +147,7 @@ func TestL3WithIngressDenyWildcard(t *testing.T) {
 			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: L4Policy{
 				Revision: repo.GetRevision(),
-				Ingress: L4DirectionPolicy{PortRules: L4PolicyMap{
+				Ingress: L4DirectionPolicy{PortRules: NewL4PolicyMapWithValues(map[string]*L4Filter{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
@@ -159,7 +160,7 @@ func TestL3WithIngressDenyWildcard(t *testing.T) {
 						},
 						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {nil}},
 					},
-				},
+				}),
 					features: denyRules,
 				},
 				Egress: newL4DirectionPolicy(),
@@ -198,6 +199,7 @@ func TestL3WithLocalHostWildcardd(t *testing.T) {
 	}
 
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
+	td.addIdentity(fooIdentity)
 
 	// Emulate Kubernetes mode with allow from localhost
 	oldLocalhostOpt := option.Config.AllowLocalhost
@@ -238,7 +240,7 @@ func TestL3WithLocalHostWildcardd(t *testing.T) {
 			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: L4Policy{
 				Revision: repo.GetRevision(),
-				Ingress: L4DirectionPolicy{PortRules: L4PolicyMap{
+				Ingress: L4DirectionPolicy{PortRules: NewL4PolicyMapWithValues(map[string]*L4Filter{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
@@ -251,7 +253,7 @@ func TestL3WithLocalHostWildcardd(t *testing.T) {
 						},
 						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {nil}},
 					},
-				},
+				}),
 					features: denyRules,
 				},
 				Egress: newL4DirectionPolicy(),
@@ -294,6 +296,7 @@ func TestMapStateWithIngressDenyWildcard(t *testing.T) {
 		idFooSelectLabels[lbl.Key] = lbl
 	}
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
+	td.addIdentity(fooIdentity)
 
 	selFoo := api.NewESFromLabels(labels.ParseSelectLabel("id=foo"))
 	rule1 := api.Rule{
@@ -329,7 +332,7 @@ func TestMapStateWithIngressDenyWildcard(t *testing.T) {
 			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: L4Policy{
 				Revision: repo.GetRevision(),
-				Ingress: L4DirectionPolicy{PortRules: L4PolicyMap{
+				Ingress: L4DirectionPolicy{PortRules: NewL4PolicyMapWithValues(map[string]*L4Filter{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
@@ -342,7 +345,7 @@ func TestMapStateWithIngressDenyWildcard(t *testing.T) {
 						},
 						RuleOrigin: map[CachedSelector]labels.LabelArrayList{td.wildcardCachedSelector: {ruleLabel}},
 					},
-				},
+				}),
 					features: denyRules,
 				},
 				Egress: newL4DirectionPolicy(),
@@ -353,8 +356,8 @@ func TestMapStateWithIngressDenyWildcard(t *testing.T) {
 		policyMapState: newMapState(map[Key]MapStateEntry{
 			// Although we have calculated deny policies, the overall policy
 			// will still allow egress to world.
-			{TrafficDirection: trafficdirection.Egress.Uint8()}: allowEgressMapStateEntry,
-			{DestPort: 80, Nexthdr: 6}:                          rule1MapStateEntry,
+			{TrafficDirection: trafficdirection.Egress.Uint8(), InvertedPortMask: 0xffff /* This is a wildcard */}: allowEgressMapStateEntry,
+			{DestPort: 80, Nexthdr: 6}: rule1MapStateEntry,
 		}),
 	}
 
@@ -399,6 +402,7 @@ func TestMapStateWithIngressDeny(t *testing.T) {
 		idFooSelectLabels[lbl.Key] = lbl
 	}
 	fooIdentity := identity.NewIdentity(12345, idFooSelectLabels)
+	td.addIdentity(fooIdentity)
 
 	lblTest := labels.ParseLabel("id=resolve_test_1")
 
@@ -482,7 +486,7 @@ func TestMapStateWithIngressDeny(t *testing.T) {
 			SelectorCache: repo.GetSelectorCache(),
 			L4Policy: L4Policy{
 				Revision: repo.GetRevision(),
-				Ingress: L4DirectionPolicy{PortRules: L4PolicyMap{
+				Ingress: L4DirectionPolicy{PortRules: NewL4PolicyMapWithValues(map[string]*L4Filter{
 					"80/TCP": {
 						Port:     80,
 						Protocol: api.ProtoTCP,
@@ -502,7 +506,7 @@ func TestMapStateWithIngressDeny(t *testing.T) {
 							cachedSelectorTest:    {ruleLabel},
 						},
 					},
-				},
+				}),
 					features: denyRules,
 				},
 				Egress: newL4DirectionPolicy(),
@@ -513,12 +517,12 @@ func TestMapStateWithIngressDeny(t *testing.T) {
 		policyMapState: newMapState(map[Key]MapStateEntry{
 			// Although we have calculated deny policies, the overall policy
 			// will still allow egress to world.
-			{TrafficDirection: trafficdirection.Egress.Uint8()}:                              allowEgressMapStateEntry,
-			{Identity: uint32(identity.ReservedIdentityWorld), DestPort: 80, Nexthdr: 6}:     rule1MapStateEntry.WithOwners(cachedSelectorWorld),
-			{Identity: uint32(identity.ReservedIdentityWorldIPv4), DestPort: 80, Nexthdr: 6}: rule1MapStateEntry.WithOwners(cachedSelectorWorldV4, cachedSelectorWorld),
-			{Identity: uint32(identity.ReservedIdentityWorldIPv6), DestPort: 80, Nexthdr: 6}: rule1MapStateEntry.WithOwners(cachedSelectorWorldV6, cachedSelectorWorld),
-			{Identity: 192, DestPort: 80, Nexthdr: 6}:                                        rule1MapStateEntry,
-			{Identity: 194, DestPort: 80, Nexthdr: 6}:                                        rule1MapStateEntry,
+			{TrafficDirection: trafficdirection.Egress.Uint8(), InvertedPortMask: 0xffff /* This is a wildcard */}: allowEgressMapStateEntry,
+			{Identity: uint32(identity.ReservedIdentityWorld), DestPort: 80, Nexthdr: 6}:                           rule1MapStateEntry.WithOwners(cachedSelectorWorld),
+			{Identity: uint32(identity.ReservedIdentityWorldIPv4), DestPort: 80, Nexthdr: 6}:                       rule1MapStateEntry.WithOwners(cachedSelectorWorldV4, cachedSelectorWorld),
+			{Identity: uint32(identity.ReservedIdentityWorldIPv6), DestPort: 80, Nexthdr: 6}:                       rule1MapStateEntry.WithOwners(cachedSelectorWorldV6, cachedSelectorWorld),
+			{Identity: 192, DestPort: 80, Nexthdr: 6}:                                                              rule1MapStateEntry,
+			{Identity: 194, DestPort: 80, Nexthdr: 6}:                                                              rule1MapStateEntry,
 		}),
 	}
 

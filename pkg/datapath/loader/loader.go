@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -104,7 +105,7 @@ type Params struct {
 func newLoader(p Params) *loader {
 	return &loader{
 		cfg:               p.Config,
-		templateCache:     newObjectCache(p.ConfigWriter, option.Config.StateDir),
+		templateCache:     newObjectCache(p.ConfigWriter, filepath.Join(option.Config.StateDir, defaults.TemplatesDir)),
 		sysctl:            p.Sysctl,
 		hostDpInitialized: make(chan struct{}),
 		prefilter:         p.Prefilter,
@@ -201,9 +202,8 @@ func (l *loader) patchHostNetdevDatapath(ep datapath.Endpoint, ifName string) (m
 		opts["SECCTX_FROM_IPCACHE"] = uint64(secctxFromIpcacheDisabled)
 	}
 
-	if option.Config.EnableNodePort {
-		opts["NATIVE_DEV_IFINDEX"] = uint64(ifIndex)
-	}
+	opts["NATIVE_DEV_IFINDEX"] = uint64(ifIndex)
+
 	if option.Config.EnableBPFMasquerade && ifName != defaults.SecondHostDevice {
 		ipv4, ipv6 := l.bpfMasqAddrs(ifName)
 
@@ -325,7 +325,7 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 		return fmt.Errorf("retrieving device %s: %w", ep.InterfaceName(), err)
 	}
 
-	coll, finalize, err := loadDatapath(spec, ELFMapSubstitutions(ep), ELFVariableSubstitutions(ep))
+	coll, commit, err := loadDatapath(spec, ELFMapSubstitutions(ep), ELFVariableSubstitutions(ep))
 	if err != nil {
 		return err
 	}
@@ -342,7 +342,9 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 		return fmt.Errorf("interface %s egress: %w", ep.InterfaceName(), err)
 	}
 
-	finalize()
+	if err := commit(); err != nil {
+		return fmt.Errorf("committing bpf pins: %w", err)
+	}
 
 	// Replace program on cilium_net.
 	net, err := netlink.LinkByName(defaults.SecondHostDevice)
@@ -355,7 +357,7 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 		return err
 	}
 
-	coll, finalize, err = loadDatapath(spec, secondRenames, secondConsts)
+	coll, commit, err = loadDatapath(spec, secondRenames, secondConsts)
 	if err != nil {
 		return err
 	}
@@ -367,7 +369,9 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 		return fmt.Errorf("interface %s ingress: %w", defaults.SecondHostDevice, err)
 	}
 
-	finalize()
+	if err := commit(); err != nil {
+		return fmt.Errorf("committing bpf pins: %w", err)
+	}
 
 	// Replace programs on physical devices, ignoring devices that don't exist.
 	for _, device := range devices {
@@ -384,7 +388,7 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 			return err
 		}
 
-		coll, finalize, err := loadDatapath(spec, netdevRenames, netdevConsts)
+		coll, commit, err := loadDatapath(spec, netdevRenames, netdevConsts)
 		if err != nil {
 			return err
 		}
@@ -415,7 +419,9 @@ func (l *loader) reloadHostDatapath(ep datapath.Endpoint, spec *ebpf.CollectionS
 			}
 		}
 
-		finalize()
+		if err := commit(); err != nil {
+			return fmt.Errorf("committing bpf pins: %w", err)
+		}
 	}
 
 	// call at the end of the function so that we can easily detect if this removes necessary
@@ -467,7 +473,7 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
 			return err
 		}
 	} else {
-		coll, finalize, err := loadDatapath(spec, ELFMapSubstitutions(ep), ELFVariableSubstitutions(ep))
+		coll, commit, err := loadDatapath(spec, ELFMapSubstitutions(ep), ELFVariableSubstitutions(ep))
 		if err != nil {
 			return err
 		}
@@ -495,7 +501,9 @@ func (l *loader) reloadDatapath(ep datapath.Endpoint, spec *ebpf.CollectionSpec)
 			}
 		}
 
-		finalize()
+		if err := commit(); err != nil {
+			return fmt.Errorf("committing bpf pins: %w", err)
+		}
 	}
 
 	if ep.RequireEndpointRoute() {
@@ -532,7 +540,7 @@ func (l *loader) replaceOverlayDatapath(ctx context.Context, cArgs []string, ifa
 		return fmt.Errorf("loading eBPF ELF %s: %w", overlayObj, err)
 	}
 
-	coll, finalize, err := loadDatapath(spec, nil, nil)
+	coll, commit, err := loadDatapath(spec, nil, nil)
 	if err != nil {
 		return err
 	}
@@ -548,7 +556,9 @@ func (l *loader) replaceOverlayDatapath(ctx context.Context, cArgs []string, ifa
 		return fmt.Errorf("interface %s egress: %w", device, err)
 	}
 
-	finalize()
+	if err := commit(); err != nil {
+		return fmt.Errorf("committing bpf pins: %w", err)
+	}
 
 	return nil
 }
@@ -566,7 +576,7 @@ func (l *loader) replaceOverlayDatapath(ctx context.Context, cArgs []string, ifa
 // CompileOrLoad with the same configuration parameters. When the first
 // goroutine completes compilation of the template, all other CompileOrLoad
 // invocations will be released.
-func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, stats *metrics.SpanStat) (err error) {
+func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, stats *metrics.SpanStat) (hash string, err error) {
 	dirs := directoryInfo{
 		Library: option.Config.BpfDir,
 		Runtime: option.Config.StateDir,
@@ -576,21 +586,15 @@ func (l *loader) ReloadDatapath(ctx context.Context, ep datapath.Endpoint, stats
 
 	cfg := l.nodeConfig.Load()
 
-	templateFile, _, err := l.templateCache.fetchOrCompile(ctx, cfg, ep, &dirs, stats)
+	spec, hash, err := l.templateCache.fetchOrCompile(ctx, cfg, ep, &dirs, stats)
 	if err != nil {
-		return err
-	}
-	defer templateFile.Close()
-
-	spec, err := bpf.LoadCollectionSpec(templateFile.Name())
-	if err != nil {
-		return fmt.Errorf("loading eBPF ELF %s: %w", templateFile.Name(), err)
+		return "", err
 	}
 
 	stats.BpfLoadProg.Start()
 	err = l.reloadDatapath(ep, spec)
 	stats.BpfLoadProg.End(err == nil)
-	return err
+	return hash, err
 }
 
 // Unload removes the datapath specific program aspects

@@ -36,6 +36,7 @@ cilium-agent hive dot-graph [flags]
       --disable-iptables-feeder-rules strings                     Chains to ignore when installing feeder rules.
       --egress-gateway-policy-map-max int                         Maximum number of entries in egress gateway policy map (default 16384)
       --egress-gateway-reconciliation-trigger-interval duration   Time between triggers of egress gateway state reconciliations (default 1s)
+      --enable-active-connection-tracking                         Count open and active connections to services, grouped by zones defined in fixed-zone-mapping.
       --enable-bandwidth-manager                                  Enable BPF bandwidth manager
       --enable-bbr                                                Enable BBR for the bandwidth manager
       --enable-cilium-api-server-access strings                   List of cilium API APIs which are administratively enabled. Supports '*'. (default [*])
@@ -49,6 +50,7 @@ cilium-agent hive dot-graph [flags]
       --enable-k8s-endpoint-slice                                 Enables k8s EndpointSlice feature in Cilium if the k8s cluster supports it (default true)
       --enable-l2-pod-announcements                               Enable announcing Pod IPs with Gratuitous ARP
       --enable-monitor                                            Enable the monitor unix domain socket server (default true)
+      --enable-route-mtu-for-cni-chaining                         Enable route MTU for pod netns when CNI chaining is used
       --enable-service-topology                                   Enable support for service topology aware hints
       --endpoint-bpf-prog-watchdog-interval duration              Interval to trigger endpoint BPF programs load check watchdog (default 30s)
       --envoy-base-id uint                                        Envoy base ID
@@ -71,6 +73,8 @@ cilium-agent hive dot-graph [flags]
       --iptables-random-fully                                     Set iptables flag random-fully on masquerading rules
       --k8s-api-server string                                     Kubernetes API server URL
       --k8s-client-burst int                                      Burst value allowed for the K8s client
+      --k8s-client-connection-keep-alive duration                 Configures the keep alive duration of K8s client connections. K8 client is disabled if the value is set to 0 (default 30s)
+      --k8s-client-connection-timeout duration                    Configures the timeout of K8s client connections. K8s client is disabled if the value is set to 0 (default 30s)
       --k8s-client-qps float32                                    Queries per second limit for the K8s client
       --k8s-heartbeat-timeout duration                            Configures the timeout for api-server heartbeat, set to 0 to disable (default 30s)
       --k8s-kubeconfig-path string                                Absolute path of the kubernetes kubeconfig file
@@ -109,6 +113,7 @@ cilium-agent hive dot-graph [flags]
       --proxy-xff-num-trusted-hops-egress uint32                  Number of trusted hops regarding the x-forwarded-for and related HTTP headers for the egress L7 policy enforcement Envoy listeners.
       --proxy-xff-num-trusted-hops-ingress uint32                 Number of trusted hops regarding the x-forwarded-for and related HTTP headers for the ingress L7 policy enforcement Envoy listeners.
       --read-cni-conf string                                      CNI configuration file to use as a source for --write-cni-conf-when-ready. If not supplied, a suitable one will be generated.
+      --static-cnp-path string                                    Directory path to watch and load static cilium network policy yaml files.
       --tunnel-port uint16                                        Tunnel port (default 8472 for "vxlan" and 6081 for "geneve")
       --tunnel-protocol string                                    Encapsulation protocol to use for the overlay ("vxlan" or "geneve") (default "vxlan")
       --use-full-tls-context                                      If enabled, persist ca.crt keys into the Envoy config even in a terminatingTLS block on an L7 Cilium Policy. This is to enable compatibility with previously buggy behaviour. This flag is deprecated and will be removed in a future release.

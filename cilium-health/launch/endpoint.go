@@ -211,7 +211,7 @@ func CleanupEndpoint() {
 
 // EndpointAdder is any type which adds an endpoint to be managed by Cilium.
 type EndpointAdder interface {
-	AddEndpoint(owner regeneration.Owner, ep *endpoint.Endpoint, reason string) error
+	AddEndpoint(owner regeneration.Owner, ep *endpoint.Endpoint) error
 }
 
 // LaunchAsEndpoint launches the cilium-health agent in a nested network
@@ -227,7 +227,6 @@ func LaunchAsEndpoint(baseCtx context.Context,
 	mtuConfig mtu.MTU,
 	bigTCPConfig *bigtcp.Configuration,
 	epMgr EndpointAdder,
-	proxy endpoint.EndpointProxy,
 	allocator cache.IdentityAllocator,
 	routingConfig routingConfigurer,
 	sysctl sysctl.Sysctl,
@@ -320,7 +319,7 @@ func LaunchAsEndpoint(baseCtx context.Context,
 	}
 
 	// Create the endpoint
-	ep, err := endpoint.NewEndpointFromChangeModel(baseCtx, owner, policyGetter, ipcache, proxy, allocator, info)
+	ep, err := endpoint.NewEndpointFromChangeModel(baseCtx, owner, policyGetter, ipcache, nil, allocator, info)
 	if err != nil {
 		return nil, fmt.Errorf("Error while creating endpoint model: %w", err)
 	}
@@ -364,7 +363,7 @@ func LaunchAsEndpoint(baseCtx context.Context,
 		}
 	}
 
-	if err := epMgr.AddEndpoint(owner, ep, "Create cilium-health endpoint"); err != nil {
+	if err := epMgr.AddEndpoint(owner, ep); err != nil {
 		return nil, fmt.Errorf("Error while adding endpoint: %w", err)
 	}
 

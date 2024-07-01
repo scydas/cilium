@@ -84,6 +84,7 @@ cilium-agent [flags]
       --debug-verbose strings                                     List of enabled verbose debug groups
       --devices strings                                           List of devices facing cluster/external network (used for BPF NodePort, BPF masquerading and host firewall); supports '+' as wildcard in device name, e.g. 'eth+'
       --direct-routing-device string                              Device name used to connect nodes in direct routing mode (used by BPF NodePort, BPF host routing; if empty, automatically set to a device with k8s InternalIP/ExternalIP or with a default route)
+      --direct-routing-skip-unreachable                           Enable skipping L2 routes between nodes on different subnets
       --disable-endpoint-crd                                      Disable use of CiliumEndpoint CRD
       --disable-envoy-version-check                               Do not perform Envoy version check
       --disable-external-ip-mitigation                            Disable ExternalIP mitigation (CVE-2020-8554, default false)
@@ -97,6 +98,7 @@ cilium-agent [flags]
       --egress-gateway-reconciliation-trigger-interval duration   Time between triggers of egress gateway state reconciliations (default 1s)
       --egress-masquerade-interfaces strings                      Limit iptables-based egress masquerading to interface selector
       --egress-multi-home-ip-rule-compat                          Offset routing table IDs under ENI IPAM mode to avoid collisions with reserved table IDs. If false, the offset is performed (new scheme), otherwise, the old scheme stays in-place.
+      --enable-active-connection-tracking                         Count open and active connections to services, grouped by zones defined in fixed-zone-mapping.
       --enable-auto-protect-node-port-range                       Append NodePort range to net.ipv4.ip_local_reserved_ports if it overlaps with ephemeral port range (net.ipv4.ip_local_port_range) (default true)
       --enable-bandwidth-manager                                  Enable BPF bandwidth manager
       --enable-bbr                                                Enable BBR for the bandwidth manager
@@ -157,6 +159,7 @@ cilium-agent [flags]
       --enable-pmtu-discovery                                     Enable path MTU discovery to send ICMP fragmentation-needed replies to the client
       --enable-policy string                                      Enable policy enforcement (default "default")
       --enable-recorder                                           Enable BPF datapath pcap recorder
+      --enable-route-mtu-for-cni-chaining                         Enable route MTU for pod netns when CNI chaining is used
       --enable-sctp                                               Enable SCTP support (beta)
       --enable-service-topology                                   Enable support for service topology aware hints
       --enable-session-affinity                                   Enable support for service session affinity
@@ -257,6 +260,8 @@ cilium-agent [flags]
       --join-cluster                                              Join a Cilium cluster via kvstore registration
       --k8s-api-server string                                     Kubernetes API server URL
       --k8s-client-burst int                                      Burst value allowed for the K8s client
+      --k8s-client-connection-keep-alive duration                 Configures the keep alive duration of K8s client connections. K8 client is disabled if the value is set to 0 (default 30s)
+      --k8s-client-connection-timeout duration                    Configures the timeout of K8s client connections. K8s client is disabled if the value is set to 0 (default 30s)
       --k8s-client-qps float32                                    Queries per second limit for the K8s client
       --k8s-heartbeat-timeout duration                            Configures the timeout for api-server heartbeat, set to 0 to disable (default 30s)
       --k8s-kubeconfig-path string                                Absolute path of the kubernetes kubeconfig file
@@ -337,6 +342,7 @@ cilium-agent [flags]
       --service-no-backend-response string                        Response to traffic for a service without backends (default "reject")
       --socket-path string                                        Sets daemon's socket path to listen for connections (default "/var/run/cilium/cilium.sock")
       --state-dir string                                          Directory path to store runtime state (default "/var/run/cilium")
+      --static-cnp-path string                                    Directory path to watch and load static cilium network policy yaml files.
       --tofqdns-dns-reject-response-code string                   DNS response code for rejecting DNS requests, available options are '[nameError refused]' (default "refused")
       --tofqdns-enable-dns-compression                            Allow the DNS proxy to compress responses to endpoints that are larger than 512 Bytes or the EDNS0 option, if present (default true)
       --tofqdns-endpoint-max-ip-per-hostname int                  Maximum number of IPs to maintain per FQDN name for each endpoint (default 50)

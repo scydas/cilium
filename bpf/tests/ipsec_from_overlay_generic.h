@@ -18,7 +18,6 @@
 #define SECLABEL
 #define SECLABEL_IPV4
 #define SECLABEL_IPV6
-#include "config_replacement.h"
 #undef ROUTER_IP
 #undef SECLABEL
 #undef SECLABEL_IPV4
@@ -192,6 +191,9 @@ int ipv4_not_decrypted_ipsec_from_overlay_check(__maybe_unused const struct __ct
 
 	if (l3->daddr != v4_pod_two)
 		test_fatal("dest IP was changed");
+
+	if (l3->check != bpf_htons(0xf948))
+		test_fatal("L3 checksum is invalid: %d", bpf_htons(l3->check));
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 
@@ -429,6 +431,9 @@ int ipv4_decrypted_ipsec_from_overlay_check(__maybe_unused const struct __ctx_bu
 
 	if (l3->daddr != v4_pod_two)
 		test_fatal("dest IP was changed");
+
+	if (l3->check != bpf_htons(0xfa68))
+		test_fatal("L3 checksum is invalid: %d", bpf_htons(l3->check));
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 

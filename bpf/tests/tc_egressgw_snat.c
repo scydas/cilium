@@ -5,7 +5,6 @@
 
 #include <bpf/ctx/skb.h>
 #include "pktgen.h"
-#include "config_replacement.h"
 
 /* Set ETH_HLEN to 14 to indicate that the packet has a 14 byte ethernet header */
 #define ETH_HLEN 14
@@ -227,6 +226,9 @@ int egressgw_skip_excluded_cidr_snat_check(const struct __ctx_buff *ctx)
 	l3 = (void *)l2 + sizeof(struct ethhdr);
 	if ((void *)l3 + sizeof(struct iphdr) > data_end)
 		test_fatal("l3 out of bounds");
+
+	if (l3->check != bpf_htons(0x4112))
+		test_fatal("L3 checksum is invalid: %d", bpf_htons(l3->check));
 
 	l4 = (void *)l3 + sizeof(struct iphdr);
 	if ((void *)l4 + sizeof(struct tcphdr) > data_end)

@@ -19,7 +19,7 @@ import (
 	"github.com/cilium/cilium/pkg/clustermesh/types"
 	cmutils "github.com/cilium/cilium/pkg/clustermesh/utils"
 	"github.com/cilium/cilium/pkg/controller"
-	"github.com/cilium/cilium/pkg/k8s"
+	"github.com/cilium/cilium/pkg/dial"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -38,7 +38,7 @@ type RemoteCluster interface {
 	Run(ctx context.Context, backend kvstore.BackendOperations, config types.CiliumClusterConfig, ready chan<- error)
 
 	Stop()
-	Remove()
+	Remove(ctx context.Context)
 }
 
 // remoteCluster represents another cluster other than the cluster the agent is
@@ -56,8 +56,8 @@ type remoteCluster struct {
 	// clusterSizeDependantInterval allows to calculate intervals based on cluster size.
 	clusterSizeDependantInterval kvstore.ClusterSizeDependantIntervalFunc
 
-	// serviceIPGetter, if not nil, is used to create a custom dialer for service resolution.
-	serviceIPGetter k8s.ServiceIPGetter
+	// resolvers are the set of resolvers used to create the custom dialer.
+	resolvers []dial.Resolver
 
 	// changed receives an event when the remote cluster configuration has
 	// changed and is closed when the configuration file was removed
@@ -124,14 +124,9 @@ func (rc *remoteCluster) releaseOldConnection() {
 	rc.etcdClusterID = ""
 	rc.mutex.Unlock()
 
-	// Release resources asynchronously in the background. Many of these
-	// operations may time out if the connection was closed due to an error
-	// condition.
-	go func() {
-		if backend != nil {
-			backend.Close(context.Background())
-		}
-	}()
+	if backend != nil {
+		backend.Close()
+	}
 }
 
 func (rc *remoteCluster) restartRemoteConnection() {
@@ -162,7 +157,7 @@ func (rc *remoteCluster) restartRemoteConnection() {
 
 				if err != nil {
 					if backend != nil {
-						backend.Close(ctx)
+						backend.Close()
 					}
 					rc.logger.WithError(err).Warning("Unable to establish etcd connection to remote cluster")
 					return err
@@ -340,11 +335,9 @@ func (rc *remoteCluster) makeExtraOpts(clusterLock *clusterLock) kvstore.ExtraOp
 
 	dialOpts = append(dialOpts, grpc.WithStreamInterceptor(newStreamInterceptor(clusterLock)), grpc.WithUnaryInterceptor(newUnaryInterceptor(clusterLock)))
 
-	if rc.serviceIPGetter != nil {
-		// Allow to resolve service names without depending on the DNS. This prevents the need
-		// for setting the DNSPolicy to ClusterFirstWithHostNet when running in host network.
-		dialOpts = append(dialOpts, grpc.WithContextDialer(k8s.CreateCustomDialer(rc.serviceIPGetter, rc.logger, false)))
-	}
+	// Allow to resolve service names without depending on the DNS. This prevents the need
+	// for setting the DNSPolicy to ClusterFirstWithHostNet when running in host network.
+	dialOpts = append(dialOpts, grpc.WithContextDialer(dial.NewContextDialer(rc.logger, rc.resolvers...)))
 
 	return kvstore.ExtraOptions{
 		NoLockQuorumCheck:            true,
@@ -392,9 +385,9 @@ func (rc *remoteCluster) onStop() {
 // (i.e., its configuration is removed). In this case, we need to drain
 // all known entries, to properly cleanup the status without requiring to
 // restart the agent.
-func (rc *remoteCluster) onRemove() {
+func (rc *remoteCluster) onRemove(ctx context.Context) {
 	rc.onStop()
-	rc.Remove()
+	rc.Remove(ctx)
 
 	rc.logger.Info("Remote cluster disconnected")
 }
